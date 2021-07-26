@@ -107,9 +107,18 @@ EXAMPLES = '''
     delete_with_all_objects: true
     state: absent
 '''
-
+import yaml
 from ansible_collections.openstack.cloud.plugins.module_utils.openstack import OpenStackModule
 
+METADATA = [
+        "content_type",
+        "is_content_type_detected",
+        "versions_location",
+        "read_ACL",
+        "write_ACL",
+        "sync_to",
+        "sync_key"
+        ]
 
 class ContainerModule(OpenStackModule):
 
@@ -157,14 +166,30 @@ class ContainerModule(OpenStackModule):
     def set_metadata(self, container, metadata):
 
         data = {}
-
+        container_meta = None
         if not self._container_exist(container):
-            new_container = self.conn.object_store.create_container(name=container).to_dict()
+            container_meta = self.conn.object_store.create_container(name=container).to_dict()
+        else:
+            container_meta = self.conn.object_store.get_container_metadata(container).to_dict()
 
-        new_container = self.conn.object_store.set_container_metadata(container, **metadata).to_dict()
-        new_container.pop('location')
-        data['container'] = new_container
-        self.exit(changed=True, **data)
+        update = False
+        for m_key, m_value in metadata.items():
+            if m_key not in container_meta or m_value != container_meta[m_key]:
+                update = True
+
+        if update:
+            data['diff'] = {}
+            data['diff']['before'] = self._diff(container_meta)
+            container_meta = self.conn.object_store.set_container_metadata(container, **metadata).to_dict()
+            data['diff']['after'] = self._diff(container_meta)
+        container_meta.pop('location')
+        data['container'] = container_meta
+        self.exit(changed=update, **data)
+
+    def _diff(self, container_meta):
+        """Extract known metadata from container_meta and dump it to yaml
+        """
+        return yaml.dump(dict([(key, container_meta[key]) for key in METADATA]))
 
     def delete_metadata(self, container, keys):
 
